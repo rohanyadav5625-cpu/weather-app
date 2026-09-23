@@ -1,6 +1,11 @@
-// Global State & Variables
+// Global State & Storage
 let currentChart = null;
+let currentRawData = null;
+let currentCityName = 'Lucknow';
+let tempUnit = localStorage.getItem('weather_unit') || 'C'; // 'C' or 'F'
+
 let searchHistory = JSON.parse(localStorage.getItem('weather_history')) || ['Lucknow', 'Delhi', 'Mumbai'];
+let favorites = JSON.parse(localStorage.getItem('weather_favorites')) || [];
 
 // Canvas Animation State
 let canvasAnimationId = null;
@@ -11,6 +16,14 @@ const cityInput = document.getElementById('cityInput');
 const searchBtn = document.getElementById('searchBtn');
 const geoBtn = document.getElementById('geoBtn');
 const recentSearchesContainer = document.getElementById('recentSearches');
+
+const addFavoriteBtn = document.getElementById('addFavoriteBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsMenu = document.getElementById('settingsMenu');
+const unitToggleBtn = document.getElementById('unitToggleBtn');
+const clearDataBtn = document.getElementById('clearDataBtn');
+const toast = document.getElementById('toast');
+
 const bgCanvas = document.getElementById('weatherBgCanvas');
 const bgCtx = bgCanvas.getContext('2d');
 
@@ -21,6 +34,22 @@ function resizeCanvas() {
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+// Temperature Helper Converter
+function convertTemp(celsius) {
+  if (tempUnit === 'F') {
+    return Math.round((celsius * 9) / 5 + 32);
+  }
+  return Math.round(celsius);
+}
+
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.remove('hidden');
+  setTimeout(() => {
+    toast.classList.add('hidden');
+  }, 2500);
+}
 
 // Event Listeners
 searchBtn.addEventListener('click', () => {
@@ -39,13 +68,63 @@ geoBtn.addEventListener('click', () => {
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       (pos) => fetchWeatherByCoords(pos.coords.latitude, pos.coords.longitude, 'Your Location'),
-      () => alert('Geolocation permission denied.')
+      () => showToast('Geolocation permission denied.')
     );
   }
 });
 
-// Init App
+// Settings & Favorite Actions
+addFavoriteBtn.addEventListener('click', () => {
+  const exists = favorites.some(f => f.toLowerCase() === currentCityName.toLowerCase());
+  if (exists) {
+    favorites = favorites.filter(f => f.toLowerCase() !== currentCityName.toLowerCase());
+    addFavoriteBtn.classList.remove('active-fav');
+    showToast(`Removed ${currentCityName} from Favorites`);
+  } else {
+    favorites.push(currentCityName);
+    addFavoriteBtn.classList.add('active-fav');
+    showToast(`Added ${currentCityName} to Favorites ⭐`);
+  }
+  localStorage.setItem('weather_favorites', JSON.stringify(favorites));
+  renderHistoryTags();
+});
+
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  settingsMenu.classList.toggle('hidden');
+});
+
+document.addEventListener('click', (e) => {
+  if (!settingsMenu.contains(e.target) && e.target !== settingsBtn) {
+    settingsMenu.classList.add('hidden');
+  }
+});
+
+unitToggleBtn.addEventListener('click', () => {
+  tempUnit = tempUnit === 'C' ? 'F' : 'C';
+  localStorage.setItem('weather_unit', tempUnit);
+  unitToggleBtn.textContent = `°${tempUnit}`;
+  showToast(`Switched unit to °${tempUnit}`);
+  
+  if (currentRawData) {
+    updateUI(currentRawData.weather, currentRawData.aqi, currentCityName);
+  }
+});
+
+clearDataBtn.addEventListener('click', () => {
+  localStorage.removeItem('weather_history');
+  localStorage.removeItem('weather_favorites');
+  searchHistory = [currentCityName];
+  favorites = [];
+  renderHistoryTags();
+  updateFavoriteIconState();
+  settingsMenu.classList.add('hidden');
+  showToast('Cleared all saved cities!');
+});
+
+// App Init
 window.addEventListener('load', () => {
+  unitToggleBtn.textContent = `°${tempUnit}`;
   renderHistoryTags();
   handleSearch(searchHistory[0] || 'Lucknow');
 });
@@ -58,7 +137,7 @@ async function handleSearch(cityName) {
     const data = await res.json();
 
     if (!data.results || data.results.length === 0) {
-      alert('City not found!');
+      showToast('City not found!');
       return;
     }
 
@@ -82,22 +161,25 @@ async function fetchWeatherByCoords(lat, lon, cityName) {
       fetch(aqiUrl).then(r => r.json())
     ]);
 
+    currentRawData = { weather: weatherRes, aqi: aqiRes };
+    currentCityName = cityName;
+
     updateUI(weatherRes, aqiRes, cityName);
   } catch (err) {
     console.error('Error fetching weather:', err);
   }
 }
 
-// Update UI & Trigger Dynamic Background Effects
+// Update UI & Elements
 function updateUI(weather, aqiData, cityName) {
   const current = weather.current;
   const daily = weather.daily;
   const hourly = weather.hourly;
 
-  // Header Data
+  // Header Data & Favorites state
   document.getElementById('cityName').textContent = cityName;
-  const weatherText = getWeatherStateText(current.weather_code);
-  document.getElementById('weatherState').textContent = weatherText;
+  document.getElementById('weatherState').textContent = getWeatherStateText(current.weather_code);
+  updateFavoriteIconState();
 
   // 1. UV Index
   const uv = Math.round(current.uv_index || 0);
@@ -110,10 +192,10 @@ function updateUI(weather, aqiData, cityName) {
   document.getElementById('humidityVal').textContent = `${humidity}%`;
   setGaugeOffset('humidityGaugePath', humidity, 100);
 
-  // 3. Real Feel
-  const feelsLike = Math.round(current.apparent_temperature);
+  // 3. Real Feel (Converts °C to °F dynamically)
+  const feelsLike = convertTemp(current.apparent_temperature);
   document.getElementById('feelsLikeVal').textContent = `${feelsLike}°`;
-  setGaugeOffset('feelsGaugePath', feelsLike, 50);
+  setGaugeOffset('feelsGaugePath', feelsLike, tempUnit === 'F' ? 120 : 50);
 
   // 4. Wind & Compass Direction
   const speed = current.wind_speed_10m;
@@ -136,11 +218,20 @@ function updateUI(weather, aqiData, cityName) {
   const aqi = aqiData.current ? aqiData.current.us_aqi : 50;
   document.getElementById('aqiText').textContent = `AQI ${aqi} • ${getAQIStatus(aqi)}`;
 
-  // Render Hourly Line Chart
+  // Render Hourly Line Chart & Cards with Unit Conversion
   renderHourlyChart(hourly);
 
-  // Trigger Interactive Background Animation
+  // Dynamic Background Engine
   startWeatherBackground(current.weather_code);
+}
+
+function updateFavoriteIconState() {
+  const isFav = favorites.some(f => f.toLowerCase() === currentCityName.toLowerCase());
+  if (isFav) {
+    addFavoriteBtn.classList.add('active-fav');
+  } else {
+    addFavoriteBtn.classList.remove('active-fav');
+  }
 }
 
 // Render Hourly Chart
@@ -149,7 +240,7 @@ function renderHourlyChart(hourly) {
   const nowHour = new Date().getHours();
 
   const next6Hours = hourly.time.slice(nowHour, nowHour + 6);
-  const temps = hourly.temperature_2m.slice(nowHour, nowHour + 6).map(t => Math.round(t));
+  const temps = hourly.temperature_2m.slice(nowHour, nowHour + 6).map(t => convertTemp(t));
   const codes = hourly.weather_code.slice(nowHour, nowHour + 6);
   const winds = hourly.wind_speed_10m.slice(nowHour, nowHour + 6);
 
@@ -205,43 +296,36 @@ function renderHourlyChart(hourly) {
   });
 }
 
-// ======================================================
-// DYNAMIC INTERACTIVE BACKGROUND ENGINE (CANVAS ANIMATIONS)
-// ======================================================
-
+// Background Animation Engine
 function startWeatherBackground(code) {
   if (canvasAnimationId) {
     cancelAnimationFrame(canvasAnimationId);
   }
   particles = [];
 
-  // Update Body Theme Gradient
   if (code === 0) {
-    document.body.style.background = 'linear-gradient(180deg, #1b3a6b 0%, #2f65a3 100%)'; // Clear Blue Sky
+    document.body.style.background = 'linear-gradient(180deg, #1b3a6b 0%, #2f65a3 100%)';
   } else if (code <= 3) {
-    document.body.style.background = 'linear-gradient(180deg, #2c3e50 0%, #4ca1af 100%)'; // Cloudy
+    document.body.style.background = 'linear-gradient(180deg, #2c3e50 0%, #4ca1af 100%)';
   } else if (code <= 67 || (code >= 80 && code <= 82)) {
-    document.body.style.background = 'linear-gradient(180deg, #1f1c2c 0%, #928dab 100%)'; // Rain
+    document.body.style.background = 'linear-gradient(180deg, #1f1c2c 0%, #928dab 100%)';
   } else if (code >= 95) {
-    document.body.style.background = 'linear-gradient(180deg, #0f2027 0%, #203a43 50%, #2c5364 100%)'; // Thunderstorm
+    document.body.style.background = 'linear-gradient(180deg, #0f2027 0%, #203a43 50%, #2c5364 100%)';
   } else if (code <= 77) {
-    document.body.style.background = 'linear-gradient(180deg, #83a4d4 0%, #b6fbff 100%)'; // Snow
+    document.body.style.background = 'linear-gradient(180deg, #83a4d4 0%, #b6fbff 100%)';
   }
 
-  // Initialize Particles / Cloud Objects based on weather
   if (code === 0 || code <= 3) {
-    // Generate Soft Fluffy Clouds for Clear / Partly Cloudy Weather
     for (let i = 0; i < 7; i++) {
       particles.push({
         x: Math.random() * bgCanvas.width,
         y: Math.random() * (bgCanvas.height * 0.45) + 30,
         scale: Math.random() * 0.8 + 0.5,
-        speedX: Math.random() * 0.4 + 0.2, // Slow horizontal drift
+        speedX: Math.random() * 0.4 + 0.2,
         opacity: code === 0 ? Math.random() * 0.25 + 0.15 : Math.random() * 0.45 + 0.25
       });
     }
   } else {
-    // Drops / Flakes for Rain, Thunderstorm & Snow
     const count = code <= 67 ? 120 : 50;
     for (let i = 0; i < count; i++) {
       particles.push({
@@ -258,9 +342,7 @@ function startWeatherBackground(code) {
   function render() {
     bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
 
-    // 1. CLEAR / SUNNY SKY (Sun Glow + Floating Clouds)
     if (code === 0) {
-      // Golden Sun Glow in Top Right
       const sunGlow = bgCtx.createRadialGradient(
         bgCanvas.width - 100, 100, 20,
         bgCanvas.width - 100, 100, 220
@@ -274,7 +356,6 @@ function startWeatherBackground(code) {
       bgCtx.arc(bgCanvas.width - 100, 100, 220, 0, Math.PI * 2);
       bgCtx.fill();
 
-      // Render Floating Soft Clouds
       particles.forEach(p => {
         p.x += p.speedX;
         if (p.x > bgCanvas.width + 160) {
@@ -283,10 +364,7 @@ function startWeatherBackground(code) {
         }
         drawCloud(bgCtx, p.x, p.y, p.scale, p.opacity);
       });
-    }
-
-    // 2. CLOUDY / OVERCAST (Drifting Clouds)
-    else if (code <= 3 || code === 45 || code === 48) {
+    } else if (code <= 3 || code === 45 || code === 48) {
       particles.forEach(p => {
         p.x += p.speedX;
         if (p.x > bgCanvas.width + 160) {
@@ -295,10 +373,7 @@ function startWeatherBackground(code) {
         }
         drawCloud(bgCtx, p.x, p.y, p.scale, p.opacity);
       });
-    }
-
-    // 3. RAIN / SHOWERS
-    else if (code <= 67 || (code >= 80 && code <= 82)) {
+    } else if (code <= 67 || (code >= 80 && code <= 82)) {
       bgCtx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
       bgCtx.lineWidth = 1.5;
       particles.forEach(p => {
@@ -312,10 +387,7 @@ function startWeatherBackground(code) {
         bgCtx.lineTo(p.x + p.speedX, p.y + 12);
         bgCtx.stroke();
       });
-    }
-
-    // 4. THUNDERSTORM
-    else if (code >= 95) {
+    } else if (code >= 95) {
       bgCtx.strokeStyle = 'rgba(200, 220, 255, 0.8)';
       bgCtx.lineWidth = 2;
       particles.forEach(p => {
@@ -334,10 +406,7 @@ function startWeatherBackground(code) {
         bgCtx.fillStyle = 'rgba(255, 255, 255, 0.25)';
         bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
       }
-    }
-
-    // 5. SNOW
-    else if (code <= 77) {
+    } else if (code <= 77) {
       bgCtx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       particles.forEach(p => {
         p.y += p.speedY * 0.5;
@@ -355,7 +424,6 @@ function startWeatherBackground(code) {
   render();
 }
 
-// Function to Render Smooth Clouds on Canvas
 function drawCloud(ctx, x, y, scale, opacity) {
   ctx.save();
   ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
@@ -369,7 +437,6 @@ function drawCloud(ctx, x, y, scale, opacity) {
   ctx.restore();
 }
 
-// SVG Gauge Offset Helper
 function setGaugeOffset(elementId, value, maxVal) {
   const path = document.getElementById(elementId);
   if (!path) return;
@@ -379,7 +446,7 @@ function setGaugeOffset(elementId, value, maxVal) {
   path.style.strokeDashoffset = offset;
 }
 
-// Search History Helpers
+// Search History & Favorites Helper
 function saveToHistory(city) {
   searchHistory = searchHistory.filter(c => c.toLowerCase() !== city.toLowerCase());
   searchHistory.unshift(city);
@@ -390,7 +457,29 @@ function saveToHistory(city) {
 
 function renderHistoryTags() {
   recentSearchesContainer.innerHTML = '';
+
+  // Favorites tags (Gold Bordered)
+  favorites.forEach(city => {
+    const tag = document.createElement('div');
+    tag.className = 'history-tag fav-tag';
+    tag.innerHTML = `
+      <span>⭐ ${city}</span>
+      <span class="remove-btn">&times;</span>
+    `;
+    tag.querySelector('span').addEventListener('click', () => handleSearch(city));
+    tag.querySelector('.remove-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      favorites = favorites.filter(c => c !== city);
+      localStorage.setItem('weather_favorites', JSON.stringify(favorites));
+      updateFavoriteIconState();
+      renderHistoryTags();
+    });
+    recentSearchesContainer.appendChild(tag);
+  });
+
+  // Recent searches
   searchHistory.forEach(city => {
+    if (favorites.some(f => f.toLowerCase() === city.toLowerCase())) return;
     const tag = document.createElement('div');
     tag.className = 'history-tag';
     tag.innerHTML = `
@@ -408,7 +497,6 @@ function renderHistoryTags() {
   });
 }
 
-// Helpers for weather descriptions & icons
 function getWeatherStateText(code) {
   if (code === 0) return 'Clear Sky';
   if (code <= 3) return 'Partly Cloudy';

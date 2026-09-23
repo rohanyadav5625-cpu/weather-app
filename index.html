@@ -19,6 +19,9 @@
   <!-- Fullscreen Animated Background Canvas -->
   <canvas id="weatherBgCanvas"></canvas>
 
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden"></div>
+
   <div class="app-container">
     
     <!-- Top Search Bar & Recent Tags Bar -->
@@ -34,7 +37,7 @@
       <div id="recentSearches" class="recent-searches"></div>
     </div>
 
-    <!-- Main Dashboard Desktop Layout (Side-by-Side split on Desktop) -->
+    <!-- Main Dashboard Desktop Layout -->
     <div class="dashboard-layout">
       
       <!-- Left Panel: Header & Hourly Graph Card -->
@@ -46,8 +49,21 @@
             <p id="weatherState" class="weather-state">Partly Cloudy</p>
           </div>
           <div class="header-actions">
-            <i class="fa-solid fa-plus"></i>
-            <i class="fa-solid fa-ellipsis-vertical"></i>
+            <i class="fa-solid fa-plus" id="addFavoriteBtn" title="Add to Favorites"></i>
+            <i class="fa-solid fa-ellipsis-vertical" id="settingsBtn" title="Settings"></i>
+            
+            <!-- Settings Dropdown Menu -->
+            <div id="settingsMenu" class="settings-dropdown hidden">
+              <div class="settings-header">Settings</div>
+              <div class="settings-item" id="unitToggleRow">
+                <span>Temperature Unit</span>
+                <button id="unitToggleBtn" class="unit-badge">°C</button>
+              </div>
+              <div class="settings-item danger" id="clearDataBtn">
+                <i class="fa-solid fa-trash"></i>
+                <span>Clear All Saved Data</span>
+              </div>
+            </div>
           </div>
         </div>
 
