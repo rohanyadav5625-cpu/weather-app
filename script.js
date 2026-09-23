@@ -1,347 +1,412 @@
+// Global State & Variables
+let currentChart = null;
+let searchHistory = JSON.parse(localStorage.getItem('weather_history')) || ['Lucknow', 'Delhi', 'Mumbai'];
+
+// Canvas Animation State
+let canvasAnimationId = null;
+let particles = [];
+
+// DOM Elements
 const cityInput = document.getElementById('cityInput');
 const searchBtn = document.getElementById('searchBtn');
 const geoBtn = document.getElementById('geoBtn');
-const errorMsg = document.getElementById('errorMsg');
 const recentSearchesContainer = document.getElementById('recentSearches');
-let searchHistory = JSON.parse(localStorage.getItem('weather_search_history')) || [];
-const celsiusBtn = document.getElementById('celsiusBtn');
-const fahrenheitBtn = document.getElementById('fahrenheitBtn');
+const bgCanvas = document.getElementById('weatherBgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
 
-const tempEl = document.getElementById('temp');
-const weatherDescEl = document.getElementById('weatherDesc');
-const locationEl = document.getElementById('location');
-const feelsLikeEl = document.getElementById('feelsLike');
-const humidityEl = document.getElementById('humidity');
-const windSpeedEl = document.getElementById('windSpeed');
-const weatherIconEl = document.getElementById('weatherIcon');
-
-const forecastSection = document.getElementById('forecastSection');
-const forecastContainer = document.getElementById('forecastContainer');
-
-let currentUnit = 'C';
-let currentWeatherData = null;
-
-// Canvas Particle Setup
-const canvas = document.getElementById('particleCanvas');
-const ctx = canvas.getContext('2d');
-let particles = [];
-let animationId = null;
-let currentEffectType = 'none';
-
+// Resize Background Canvas
 function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  bgCanvas.width = window.innerWidth;
+  bgCanvas.height = window.innerHeight;
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-const weatherCodes = {
-  0: { desc: "Clear Sky", icon: "fa-sun", theme: "theme-clear", effect: "none" },
-  1: { desc: "Mainly Clear", icon: "fa-cloud-sun", theme: "theme-clear", effect: "none" },
-  2: { desc: "Partly Cloudy", icon: "fa-cloud-sun", theme: "theme-cloudy", effect: "none" },
-  3: { desc: "Overcast", icon: "fa-cloud", theme: "theme-cloudy", effect: "none" },
-  45: { desc: "Foggy", icon: "fa-smog", theme: "theme-cloudy", effect: "none" },
-  51: { desc: "Light Drizzle", icon: "fa-cloud-rain", theme: "theme-rainy", effect: "rain" },
-  61: { desc: "Rainy", icon: "fa-cloud-showers-heavy", theme: "theme-rainy", effect: "rain" },
-  71: { desc: "Snowfall", icon: "fa-snowflake", theme: "theme-snow", effect: "snow" },
-  95: { desc: "Thunderstorm", icon: "fa-bolt", theme: "theme-thunder", effect: "rain" }
-};
+// Event Listeners
+searchBtn.addEventListener('click', () => {
+  const query = cityInput.value.trim();
+  if (query) handleSearch(query);
+});
 
-function createParticles(type) {
+cityInput.addEventListener('keyup', (e) => {
+  if (e.key === 'Enter') {
+    const query = cityInput.value.trim();
+    if (query) handleSearch(query);
+  }
+});
+
+geoBtn.addEventListener('click', () => {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => fetchWeatherByCoords(pos.coords.latitude, pos.coords.longitude, 'Your Location'),
+      () => alert('Geolocation permission denied.')
+    );
+  }
+});
+
+// Init App
+window.addEventListener('load', () => {
+  renderHistoryTags();
+  handleSearch(searchHistory[0] || 'Lucknow');
+});
+
+// Search Logic
+async function handleSearch(cityName) {
+  try {
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=en&format=json`;
+    const res = await fetch(geoUrl);
+    const data = await res.json();
+
+    if (!data.results || data.results.length === 0) {
+      alert('City not found!');
+      return;
+    }
+
+    const { latitude, longitude, name } = data.results[0];
+    saveToHistory(name);
+    fetchWeatherByCoords(latitude, longitude, name);
+    cityInput.value = '';
+  } catch (err) {
+    console.error('Error fetching city:', err);
+  }
+}
+
+// Fetch Weather & AQI
+async function fetchWeatherByCoords(lat, lon, cityName) {
+  try {
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m,uv_index&hourly=temperature_2m,weather_code,wind_speed_10m&daily=sunrise,sunset&timezone=auto`;
+    const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi`;
+
+    const [weatherRes, aqiRes] = await Promise.all([
+      fetch(weatherUrl).then(r => r.json()),
+      fetch(aqiUrl).then(r => r.json())
+    ]);
+
+    updateUI(weatherRes, aqiRes, cityName);
+  } catch (err) {
+    console.error('Error fetching weather:', err);
+  }
+}
+
+// Update UI & Trigger Dynamic Background Effects
+function updateUI(weather, aqiData, cityName) {
+  const current = weather.current;
+  const daily = weather.daily;
+  const hourly = weather.hourly;
+
+  // Header Data
+  document.getElementById('cityName').textContent = cityName;
+  const weatherText = getWeatherStateText(current.weather_code);
+  document.getElementById('weatherState').textContent = weatherText;
+
+  // 1. UV Index
+  const uv = Math.round(current.uv_index || 0);
+  document.getElementById('uvVal').textContent = uv;
+  document.getElementById('uvStatusText').textContent = getUVStatus(uv);
+  setGaugeOffset('uvGaugePath', uv, 12);
+
+  // 2. Humidity
+  const humidity = Math.round(current.relative_humidity_2m);
+  document.getElementById('humidityVal').textContent = `${humidity}%`;
+  setGaugeOffset('humidityGaugePath', humidity, 100);
+
+  // 3. Real Feel
+  const feelsLike = Math.round(current.apparent_temperature);
+  document.getElementById('feelsLikeVal').textContent = `${feelsLike}°`;
+  setGaugeOffset('feelsGaugePath', feelsLike, 50);
+
+  // 4. Wind & Compass Direction
+  const speed = current.wind_speed_10m;
+  document.getElementById('windSpeedVal').innerHTML = `${speed} <span class="unit-text">km/h</span>`;
+  document.getElementById('windDirText').textContent = getWindDirectionName(current.wind_direction_10m);
+  document.getElementById('compassArrow').style.transform = `rotate(${current.wind_direction_10m}deg)`;
+
+  // 5. Sunset / Sunrise
+  const formatTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const sunsetStr = formatTime(daily.sunset[0]);
+  const sunriseStr = formatTime(daily.sunrise[0]);
+  document.getElementById('sunsetTime').textContent = sunsetStr;
+  document.getElementById('sunriseVal').textContent = sunriseStr;
+  document.getElementById('sunsetVal').textContent = sunsetStr;
+
+  // 6. Pressure
+  document.getElementById('pressureVal').textContent = Math.round(current.surface_pressure);
+
+  // 7. AQI
+  const aqi = aqiData.current ? aqiData.current.us_aqi : 50;
+  document.getElementById('aqiText').textContent = `AQI ${aqi} • ${getAQIStatus(aqi)}`;
+
+  // Render Hourly Line Chart
+  renderHourlyChart(hourly);
+
+  // Trigger Interactive Background Animation (Rain, Sun, Clouds, Thunderstorm, Snow)
+  startWeatherBackground(current.weather_code);
+}
+
+// Render Hourly Chart
+function renderHourlyChart(hourly) {
+  const ctx = document.getElementById('hourlyCanvas').getContext('2d');
+  const nowHour = new Date().getHours();
+
+  const next6Hours = hourly.time.slice(nowHour, nowHour + 6);
+  const temps = hourly.temperature_2m.slice(nowHour, nowHour + 6).map(t => Math.round(t));
+  const codes = hourly.weather_code.slice(nowHour, nowHour + 6);
+  const winds = hourly.wind_speed_10m.slice(nowHour, nowHour + 6);
+
+  const labels = next6Hours.map((t, index) => {
+    if (index === 0) return 'Now';
+    return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  });
+
+  if (currentChart) {
+    currentChart.destroy();
+  }
+
+  currentChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: temps,
+        borderColor: '#ffa726',
+        borderWidth: 2,
+        tension: 0.4,
+        pointBackgroundColor: '#ffffff',
+        pointRadius: 4,
+        fill: false
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { display: false }
+      }
+    }
+  });
+
+  // Render Hourly Items Strip
+  const itemsContainer = document.getElementById('hourlyItemsContainer');
+  itemsContainer.innerHTML = '';
+
+  labels.forEach((label, i) => {
+    const iconClass = getWeatherIconClass(codes[i]);
+    const div = document.createElement('div');
+    div.className = 'hourly-item';
+    div.innerHTML = `
+      <span>${temps[i]}°</span>
+      <i class="${iconClass}"></i>
+      <span class="hourly-wind">${winds[i]}km/h</span>
+      <span>${label}</span>
+    `;
+    itemsContainer.appendChild(div);
+  });
+}
+
+// ======================================================
+// DYNAMIC INTERACTIVE BACKGROUND ENGINE (CANVAS ANIMATIONS)
+// ======================================================
+
+function startWeatherBackground(code) {
+  if (canvasAnimationId) {
+    cancelAnimationFrame(canvasAnimationId);
+  }
   particles = [];
-  const count = type === 'rain' ? 120 : type === 'snow' ? 80 : 0;
 
+  // Update Body Theme Gradient Based on Weather
+  if (code === 0) {
+    document.body.style.background = 'linear-gradient(180deg, #1e3c72 0%, #2a5298 100%)'; // Sunny / Clear
+  } else if (code <= 3) {
+    document.body.style.background = 'linear-gradient(180deg, #2c3e50 0%, #4ca1af 100%)'; // Cloudy
+  } else if (code <= 67 || (code >= 80 && code <= 82)) {
+    document.body.style.background = 'linear-gradient(180deg, #1f1c2c 0%, #928dab 100%)'; // Rain
+  } else if (code >= 95) {
+    document.body.style.background = 'linear-gradient(180deg, #0f2027 0%, #203a43 50%, #2c5364 100%)'; // Thunderstorm
+  } else if (code <= 77) {
+    document.body.style.background = 'linear-gradient(180deg, #83a4d4 0%, #b6fbff 100%)'; // Snow
+  }
+
+  // Create Particles
+  const count = code <= 67 ? 120 : 50;
   for (let i = 0; i < count; i++) {
-    if (type === 'rain') {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        length: Math.random() * 20 + 10,
-        speed: Math.random() * 10 + 12
-      });
-    } else if (type === 'snow') {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        radius: Math.random() * 3 + 1,
-        speedY: Math.random() * 1.5 + 0.8,
-        speedX: Math.random() * 1 - 0.5,
-        opacity: Math.random() * 0.7 + 0.3
+    particles.push({
+      x: Math.random() * bgCanvas.width,
+      y: Math.random() * bgCanvas.height,
+      radius: Math.random() * 3 + 1,
+      speedY: Math.random() * 5 + 3,
+      speedX: Math.random() * 1.5 - 0.75,
+      opacity: Math.random() * 0.7 + 0.3
+    });
+  }
+
+  function render() {
+    bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+
+    // 1. Clear / Sunny Light Particles & Warm Sun Rays
+    if (code === 0) {
+      bgCtx.fillStyle = 'rgba(255, 235, 59, 0.15)';
+      bgCtx.beginPath();
+      bgCtx.arc(bgCanvas.width - 120, 100, 160, 0, Math.PI * 2);
+      bgCtx.fill();
+
+      particles.forEach(p => {
+        p.y -= p.speedY * 0.2;
+        if (p.y < 0) p.y = bgCanvas.height;
+        bgCtx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.5})`;
+        bgCtx.beginPath();
+        bgCtx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
+        bgCtx.fill();
       });
     }
-  }
-}
 
-function renderParticles() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 2. Clouds / Fog Floating Effects
+    else if (code <= 3 || code === 45 || code === 48) {
+      particles.forEach(p => {
+        p.x += p.speedX * 0.5;
+        if (p.x > bgCanvas.width) p.x = 0;
+        bgCtx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.2})`;
+        bgCtx.beginPath();
+        bgCtx.arc(p.x, p.y, p.radius * 20, 0, Math.PI * 2);
+        bgCtx.fill();
+      });
+    }
 
-  if (currentEffectType === 'rain') {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 1.2;
-    ctx.lineCap = 'round';
+    // 3. Rain / Showers Animation
+    else if (code <= 67 || (code >= 80 && code <= 82)) {
+      bgCtx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      bgCtx.lineWidth = 1.5;
+      particles.forEach(p => {
+        p.y += p.speedY * 2;
+        if (p.y > bgCanvas.height) {
+          p.y = 0;
+          p.x = Math.random() * bgCanvas.width;
+        }
+        bgCtx.beginPath();
+        bgCtx.moveTo(p.x, p.y);
+        bgCtx.lineTo(p.x + p.speedX, p.y + 12);
+        bgCtx.stroke();
+      });
+    }
 
-    particles.forEach(p => {
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x - 2, p.y + p.length);
-      ctx.stroke();
+    // 4. Thunderstorm (Rain + Lightning Flashes)
+    else if (code >= 95) {
+      bgCtx.strokeStyle = 'rgba(200, 220, 255, 0.8)';
+      bgCtx.lineWidth = 2;
+      particles.forEach(p => {
+        p.y += p.speedY * 2.5;
+        if (p.y > bgCanvas.height) {
+          p.y = 0;
+          p.x = Math.random() * bgCanvas.width;
+        }
+        bgCtx.beginPath();
+        bgCtx.moveTo(p.x, p.y);
+        bgCtx.lineTo(p.x, p.y + 15);
+        bgCtx.stroke();
+      });
 
-      p.y += p.speed;
-      p.x -= 0.5;
-
-      if (p.y > canvas.height) {
-        p.y = -p.length;
-        p.x = Math.random() * canvas.width;
+      // Random Lightning Screen Flash
+      if (Math.random() < 0.015) {
+        bgCtx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
       }
-    });
+    }
 
-  } else if (currentEffectType === 'snow') {
-    particles.forEach(p => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
-      ctx.fill();
+    // 5. Snow Particles
+    else if (code <= 77) {
+      bgCtx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      particles.forEach(p => {
+        p.y += p.speedY * 0.5;
+        p.x += Math.sin(p.y * 0.02);
+        if (p.y > bgCanvas.height) p.y = 0;
+        bgCtx.beginPath();
+        bgCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        bgCtx.fill();
+      });
+    }
 
-      p.y += p.speedY;
-      p.x += p.speedX;
-
-      if (p.y > canvas.height) {
-        p.y = -p.radius;
-        p.x = Math.random() * canvas.width;
-      }
-    });
+    canvasAnimationId = requestAnimationFrame(render);
   }
 
-  if (currentEffectType !== 'none') {
-    animationId = requestAnimationFrame(renderParticles);
-  }
+  render();
 }
 
-function startParticleEffect(type) {
-  if (currentEffectType === type) return;
-  if (animationId) cancelAnimationFrame(animationId);
-  currentEffectType = type;
-
-  if (type === 'none') {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    return;
-  }
-
-  createParticles(type);
-  renderParticles();
+// SVG Gauge Offset Helper
+function setGaugeOffset(elementId, value, maxVal) {
+  const path = document.getElementById(elementId);
+  if (!path) return;
+  const maxDash = 126;
+  const percentage = Math.min(Math.max(value / maxVal, 0), 1);
+  const offset = maxDash - (maxDash * percentage);
+  path.style.strokeDashoffset = offset;
 }
-function renderHistory() {
+
+// Search History Helpers
+function saveToHistory(city) {
+  searchHistory = searchHistory.filter(c => c.toLowerCase() !== city.toLowerCase());
+  searchHistory.unshift(city);
+  if (searchHistory.length > 5) searchHistory.pop();
+  localStorage.setItem('weather_history', JSON.stringify(searchHistory));
+  renderHistoryTags();
+}
+
+function renderHistoryTags() {
   recentSearchesContainer.innerHTML = '';
-  if (searchHistory.length === 0) return;
-
-  searchHistory.forEach((city) => {
+  searchHistory.forEach(city => {
     const tag = document.createElement('div');
     tag.className = 'history-tag';
     tag.innerHTML = `
       <span>${city}</span>
-      <i class="fa-solid fa-xmark remove-btn"></i>
+      <span class="remove-btn">&times;</span>
     `;
-
-    tag.addEventListener('click', () => {
-      cityInput.value = city;
-      fetchWeather(city);
+    tag.querySelector('span').addEventListener('click', () => handleSearch(city));
+    tag.querySelector('.remove-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      searchHistory = searchHistory.filter(c => c !== city);
+      localStorage.setItem('weather_history', JSON.stringify(searchHistory));
+      renderHistoryTags();
     });
-
-    const removeBtn = tag.querySelector('.remove-btn');
-    removeBtn.addEventListener('click', (e) => removeFromHistory(city, e));
-
     recentSearchesContainer.appendChild(tag);
   });
 }
 
-function saveToHistory(cityName) {
-  if (!cityName) return;
-
-  searchHistory = searchHistory.filter(
-    (item) => item.toLowerCase() !== cityName.toLowerCase()
-  );
-
-  searchHistory.unshift(cityName);
-
-  if (searchHistory.length > 5) searchHistory.pop();
-
-  localStorage.setItem('weather_search_history', JSON.stringify(searchHistory));
-  renderHistory();
+// Helper Functions
+function getWeatherStateText(code) {
+  if (code === 0) return 'Clear Sky';
+  if (code <= 3) return 'Partly Cloudy';
+  if (code <= 48) return 'Foggy';
+  if (code <= 67) return 'Rainy';
+  if (code <= 77) return 'Snowy';
+  if (code <= 82) return 'Rain Showers';
+  return 'Thunderstorm';
 }
 
-function removeFromHistory(cityName, e) {
-  e.stopPropagation();
-  searchHistory = searchHistory.filter(
-    (item) => item.toLowerCase() !== cityName.toLowerCase()
-  );
-  localStorage.setItem('weather_search_history', JSON.stringify(searchHistory));
-  renderHistory();
-}
-function formatTemp(tempInCelsius) {
-  if (currentUnit === 'F') {
-    return `${Math.round((tempInCelsius * 9) / 5 + 32)}°F`;
-  }
-  return `${Math.round(tempInCelsius)}°C`;
+function getWeatherIconClass(code) {
+  if (code === 0) return 'fa-solid fa-sun';
+  if (code <= 3) return 'fa-solid fa-cloud-sun';
+  if (code <= 48) return 'fa-solid fa-smog';
+  if (code <= 67) return 'fa-solid fa-cloud-rain';
+  if (code <= 77) return 'fa-solid fa-snowflake';
+  if (code <= 82) return 'fa-solid fa-cloud-showers-heavy';
+  return 'fa-solid fa-bolt';
 }
 
-function updateUI() {
-  if (!currentWeatherData) return;
-
-  const { current, daily, name, country } = currentWeatherData;
-
-  locationEl.textContent = `${name}, ${country}`;
-  tempEl.textContent = formatTemp(current.temperature_2m);
-  feelsLikeEl.textContent = formatTemp(current.apparent_temperature);
-  humidityEl.textContent = `${current.relative_humidity_2m}%`;
-  windSpeedEl.textContent = `${current.wind_speed_10m} km/h`;
-
-  const weatherInfo = weatherCodes[current.weather_code] || { desc: "Moderate", icon: "fa-cloud", theme: "theme-default", effect: "none" };
-  weatherDescEl.textContent = weatherInfo.desc;
-  weatherIconEl.innerHTML = `<i class="fa-solid ${weatherInfo.icon}"></i>`;
-
-  document.body.className = weatherInfo.theme;
-  startParticleEffect(weatherInfo.effect);
-
-  forecastContainer.innerHTML = '';
-  for (let i = 1; i <= 5; i++) {
-    const date = new Date(daily.time[i]);
-    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-    const dayCode = daily.weather_code[i];
-    const maxTemp = formatTemp(daily.temperature_2m_max[i]);
-    const minTemp = formatTemp(daily.temperature_2m_min[i]);
-    const dayInfo = weatherCodes[dayCode] || { icon: "fa-cloud" };
-
-    const card = document.createElement('div');
-    card.classList.add('forecast-card');
-    card.innerHTML = `
-      <div class="day">${dayName}</div>
-      <i class="fa-solid ${dayInfo.icon}"></i>
-      <div class="high-temp">${maxTemp}</div>
-      <div class="low-temp">${minTemp}</div>
-    `;
-    forecastContainer.appendChild(card);
-  }
-
-  forecastSection.style.display = 'block';
+function getUVStatus(uv) {
+  if (uv <= 2) return 'Low';
+  if (uv <= 5) return 'Moderate';
+  if (uv <= 7) return 'High';
+  return 'Strong';
 }
 
-// Fetch weather by City name
-async function fetchWeather(city) {
-  try {
-    errorMsg.style.display = 'none';
-
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`;
-    const geoRes = await fetch(geoUrl);
-    const geoData = await geoRes.json();
-
-    if (!geoData.results || geoData.results.length === 0) {
-      errorMsg.style.display = 'block';
-      forecastSection.style.display = 'none';
-      startParticleEffect('none');
-      return;
-    }
-
-    const { latitude, longitude, name, country } = geoData.results[0];
-    await fetchWeatherData(latitude, longitude, name, country);
-
-  } catch (error) {
-    errorMsg.style.display = 'block';
-    errorMsg.textContent = "Error fetching weather data.";
-    forecastSection.style.display = 'none';
-    startParticleEffect('none');
-  }
+function getAQIStatus(aqi) {
+  if (aqi <= 50) return 'Good';
+  if (aqi <= 100) return 'Moderate';
+  if (aqi <= 150) return 'Unhealthy';
+  return 'Hazardous';
 }
 
-// Fetch weather by GPS Coordinates
-async function fetchWeatherByCoords(lat, lon) {
-  try {
-    errorMsg.style.display = 'none';
-
-    // Reverse Geocoding to retrieve City/Country name
-    const reverseGeoUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
-    const geoRes = await fetch(reverseGeoUrl);
-    const geoData = await geoRes.json();
-
-    const name = geoData.city || geoData.locality || geoData.principalSubdivision || "Your Location";
-    const country = geoData.countryCode || geoData.countryName || "";
-
-    await fetchWeatherData(lat, lon, name, country);
-
-  } catch (error) {
-    errorMsg.style.display = 'block';
-    errorMsg.textContent = "Error fetching location weather.";
-    forecastSection.style.display = 'none';
-    startParticleEffect('none');
-  }
+function getWindDirectionName(deg) {
+  const dirs = ['North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest'];
+  return dirs[Math.round(deg / 45) % 8];
 }
-
-// Helper to fetch Open-Meteo forecast given coordinates
-async function fetchWeatherData(latitude, longitude, name, country) {
-  const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto`;
-  const weatherRes = await fetch(weatherUrl);
-  const weatherData = await weatherRes.json();
-
-  currentWeatherData = {
-    current: weatherData.current,
-    daily: weatherData.daily,
-    name,
-    country
-  };
-saveToHistory(name); // <-- YE LINE ADD KAREIN
-  updateUI();
-}
-
-// Event Listeners
-celsiusBtn.addEventListener('click', () => {
-  if (currentUnit !== 'C') {
-    currentUnit = 'C';
-    celsiusBtn.classList.add('active');
-    fahrenheitBtn.classList.remove('active');
-    updateUI();
-  }
-});
-
-fahrenheitBtn.addEventListener('click', () => {
-  if (currentUnit !== 'F') {
-    currentUnit = 'F';
-    fahrenheitBtn.classList.add('active');
-    celsiusBtn.classList.remove('active');
-    updateUI();
-  }
-});
-
-searchBtn.addEventListener('click', () => {
-  if (cityInput.value.trim() !== "") fetchWeather(cityInput.value.trim());
-});
-
-cityInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && cityInput.value.trim() !== "") fetchWeather(cityInput.value.trim());
-});
-
-// Geolocation Trigger
-geoBtn.addEventListener('click', () => {
-  if (navigator.geolocation) {
-    geoBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        geoBtn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i>';
-        fetchWeatherByCoords(position.coords.latitude, position.coords.longitude);
-      },
-      (error) => {
-        geoBtn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i>';
-        errorMsg.style.display = 'block';
-        errorMsg.textContent = "Geolocation permission denied or unavailable.";
-      }
-    );
-  } else {
-    errorMsg.style.display = 'block';
-    errorMsg.textContent = "Geolocation is not supported by your browser.";
-  }
-});
-renderHistory();
-
-
-
-
-
-
