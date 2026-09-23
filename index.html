@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modern Weather App</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="theme-default">
+
+  <canvas id="particleCanvas"></canvas>
+
+  <div class="weather-card">
+    <div class="top-bar">
+      <div class="search-box">
+        <i class="fa-solid fa-location-dot icon-location"></i>
+        <input type="text" id="cityInput" placeholder="Enter city name..." autocomplete="off">
+        <button id="searchBtn" title="Search City"><i class="fa-solid fa-magnifying-glass"></i></button>
+        <button id="geoBtn" title="Use Current Location"><i class="fa-solid fa-location-crosshairs"></i></button>
+      </div>
+      <div class="unit-toggle">
+        <button id="celsiusBtn" class="unit-btn active">°C</button>
+        <button id="fahrenheitBtn" class="unit-btn">°F</button>
+      </div>
+    </div>
+    <div id="recentSearches" class="recent-searches"></div>
+
+    <div class="error-msg" id="errorMsg">City not found. Please try again!</div>
+
+    <div class="weather-body" id="weatherBody">
+      <div class="weather-icon" id="weatherIcon">
+        <i class="fa-solid fa-cloud-sun"></i>
+      </div>
+      <h1 class="temp" id="temp">--°C</h1>
+      <p class="weather-desc" id="weatherDesc">Search for a city or use location</p>
+      <h2 class="location" id="location">--</h2>
+
+      <div class="details-grid">
+        <div class="detail-card">
+          <i class="fa-solid fa-temperature-half"></i>
+          <div>
+            <p id="feelsLike">--°C</p>
+            <span>Feels Like</span>
+          </div>
+        </div>
+        <div class="detail-card">
+          <i class="fa-solid fa-droplet"></i>
+          <div>
+            <p id="humidity">--%</p>
+            <span>Humidity</span>
+          </div>
+        </div>
+        <div class="detail-card">
+          <i class="fa-solid fa-wind"></i>
+          <div>
+            <p id="windSpeed">-- km/h</p>
+            <span>Wind Speed</span>
+          </div>
+        </div>
+      </div>
+<div class="hourly-section" id="hourlySection" style="display: none;">
+  <h3>24-Hour Forecast</h3>
+  <div class="chart-container">
+    <canvas id="hourlyChart"></canvas>
+  </div>
+</div>
+      <div class="forecast-section" id="forecastSection" style="display: none;">
+        <h3>5-Day Forecast</h3>
+        <div class="forecast-container" id="forecastContainer"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
