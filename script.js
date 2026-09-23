@@ -139,7 +139,7 @@ function updateUI(weather, aqiData, cityName) {
   // Render Hourly Line Chart
   renderHourlyChart(hourly);
 
-  // Trigger Interactive Background Animation (Rain, Sun, Clouds, Thunderstorm, Snow)
+  // Trigger Interactive Background Animation
   startWeatherBackground(current.weather_code);
 }
 
@@ -215,9 +215,9 @@ function startWeatherBackground(code) {
   }
   particles = [];
 
-  // Update Body Theme Gradient Based on Weather
+  // Update Body Theme Gradient
   if (code === 0) {
-    document.body.style.background = 'linear-gradient(180deg, #1e3c72 0%, #2a5298 100%)'; // Sunny / Clear
+    document.body.style.background = 'linear-gradient(180deg, #1b3a6b 0%, #2f65a3 100%)'; // Clear Blue Sky
   } else if (code <= 3) {
     document.body.style.background = 'linear-gradient(180deg, #2c3e50 0%, #4ca1af 100%)'; // Cloudy
   } else if (code <= 67 || (code >= 80 && code <= 82)) {
@@ -228,52 +228,76 @@ function startWeatherBackground(code) {
     document.body.style.background = 'linear-gradient(180deg, #83a4d4 0%, #b6fbff 100%)'; // Snow
   }
 
-  // Create Particles
-  const count = code <= 67 ? 120 : 50;
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      x: Math.random() * bgCanvas.width,
-      y: Math.random() * bgCanvas.height,
-      radius: Math.random() * 3 + 1,
-      speedY: Math.random() * 5 + 3,
-      speedX: Math.random() * 1.5 - 0.75,
-      opacity: Math.random() * 0.7 + 0.3
-    });
+  // Initialize Particles / Cloud Objects based on weather
+  if (code === 0 || code <= 3) {
+    // Generate Soft Fluffy Clouds for Clear / Partly Cloudy Weather
+    for (let i = 0; i < 7; i++) {
+      particles.push({
+        x: Math.random() * bgCanvas.width,
+        y: Math.random() * (bgCanvas.height * 0.45) + 30,
+        scale: Math.random() * 0.8 + 0.5,
+        speedX: Math.random() * 0.4 + 0.2, // Slow horizontal drift
+        opacity: code === 0 ? Math.random() * 0.25 + 0.15 : Math.random() * 0.45 + 0.25
+      });
+    }
+  } else {
+    // Drops / Flakes for Rain, Thunderstorm & Snow
+    const count = code <= 67 ? 120 : 50;
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * bgCanvas.width,
+        y: Math.random() * bgCanvas.height,
+        radius: Math.random() * 3 + 1,
+        speedY: Math.random() * 5 + 3,
+        speedX: Math.random() * 1.5 - 0.75,
+        opacity: Math.random() * 0.7 + 0.3
+      });
+    }
   }
 
   function render() {
     bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
 
-    // 1. Clear / Sunny Light Particles & Warm Sun Rays
+    // 1. CLEAR / SUNNY SKY (Sun Glow + Floating Clouds)
     if (code === 0) {
-      bgCtx.fillStyle = 'rgba(255, 235, 59, 0.15)';
+      // Golden Sun Glow in Top Right
+      const sunGlow = bgCtx.createRadialGradient(
+        bgCanvas.width - 100, 100, 20,
+        bgCanvas.width - 100, 100, 220
+      );
+      sunGlow.addColorStop(0, 'rgba(255, 235, 59, 0.35)');
+      sunGlow.addColorStop(0.5, 'rgba(255, 193, 7, 0.15)');
+      sunGlow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      bgCtx.fillStyle = sunGlow;
       bgCtx.beginPath();
-      bgCtx.arc(bgCanvas.width - 120, 100, 160, 0, Math.PI * 2);
+      bgCtx.arc(bgCanvas.width - 100, 100, 220, 0, Math.PI * 2);
       bgCtx.fill();
 
+      // Render Floating Soft Clouds
       particles.forEach(p => {
-        p.y -= p.speedY * 0.2;
-        if (p.y < 0) p.y = bgCanvas.height;
-        bgCtx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.5})`;
-        bgCtx.beginPath();
-        bgCtx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
-        bgCtx.fill();
+        p.x += p.speedX;
+        if (p.x > bgCanvas.width + 160) {
+          p.x = -160;
+          p.y = Math.random() * (bgCanvas.height * 0.4) + 30;
+        }
+        drawCloud(bgCtx, p.x, p.y, p.scale, p.opacity);
       });
     }
 
-    // 2. Clouds / Fog Floating Effects
+    // 2. CLOUDY / OVERCAST (Drifting Clouds)
     else if (code <= 3 || code === 45 || code === 48) {
       particles.forEach(p => {
-        p.x += p.speedX * 0.5;
-        if (p.x > bgCanvas.width) p.x = 0;
-        bgCtx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.2})`;
-        bgCtx.beginPath();
-        bgCtx.arc(p.x, p.y, p.radius * 20, 0, Math.PI * 2);
-        bgCtx.fill();
+        p.x += p.speedX;
+        if (p.x > bgCanvas.width + 160) {
+          p.x = -160;
+          p.y = Math.random() * (bgCanvas.height * 0.45) + 30;
+        }
+        drawCloud(bgCtx, p.x, p.y, p.scale, p.opacity);
       });
     }
 
-    // 3. Rain / Showers Animation
+    // 3. RAIN / SHOWERS
     else if (code <= 67 || (code >= 80 && code <= 82)) {
       bgCtx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
       bgCtx.lineWidth = 1.5;
@@ -290,7 +314,7 @@ function startWeatherBackground(code) {
       });
     }
 
-    // 4. Thunderstorm (Rain + Lightning Flashes)
+    // 4. THUNDERSTORM
     else if (code >= 95) {
       bgCtx.strokeStyle = 'rgba(200, 220, 255, 0.8)';
       bgCtx.lineWidth = 2;
@@ -306,14 +330,13 @@ function startWeatherBackground(code) {
         bgCtx.stroke();
       });
 
-      // Random Lightning Screen Flash
       if (Math.random() < 0.015) {
         bgCtx.fillStyle = 'rgba(255, 255, 255, 0.25)';
         bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
       }
     }
 
-    // 5. Snow Particles
+    // 5. SNOW
     else if (code <= 77) {
       bgCtx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       particles.forEach(p => {
@@ -330,6 +353,20 @@ function startWeatherBackground(code) {
   }
 
   render();
+}
+
+// Function to Render Smooth Clouds on Canvas
+function drawCloud(ctx, x, y, scale, opacity) {
+  ctx.save();
+  ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+  ctx.beginPath();
+  ctx.arc(x, y, 30 * scale, Math.PI * 0.5, Math.PI * 1.5);
+  ctx.arc(x + 35 * scale, y - 25 * scale, 35 * scale, Math.PI * 1, Math.PI * 1.85);
+  ctx.arc(x + 75 * scale, y - 20 * scale, 30 * scale, Math.PI * 1.37, Math.PI * 1.91);
+  ctx.arc(x + 100 * scale, y, 25 * scale, Math.PI * 1.5, Math.PI * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 // SVG Gauge Offset Helper
@@ -371,7 +408,7 @@ function renderHistoryTags() {
   });
 }
 
-// Helper Functions
+// Helpers for weather descriptions & icons
 function getWeatherStateText(code) {
   if (code === 0) return 'Clear Sky';
   if (code <= 3) return 'Partly Cloudy';
